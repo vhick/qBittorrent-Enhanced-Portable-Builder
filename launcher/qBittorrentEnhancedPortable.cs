@@ -20,14 +20,21 @@ internal static class PortableLauncher
         string profile = Path.Combine(data, "profile");
         string downloads = Path.Combine(data, "Downloads");
 
+        // This must be handled BEFORE checking for App\qBittorrent\qbittorrent.exe:
+        // the CI build compiles the launcher before it packages the app files.
+        // A GUI error dialog on a headless runner would otherwise block indefinitely.
+        bool selfTest = args.Length == 1 &&
+            String.Equals(args[0], "--portable-self-test", StringComparison.OrdinalIgnoreCase);
+
         try
         {
+            // Headless, read-only smoke test. Never show a dialog, access the real
+            // application, or create user Data during GitHub Actions verification.
+            if (selfTest)
+                return File.Exists(System.Reflection.Assembly.GetExecutingAssembly().Location) ? 0 : 2;
+
             if (!File.Exists(app))
                 throw new FileNotFoundException("The qBittorrent application file is missing. Re-extract the portable ZIP without removing App.", app);
-
-            // A workflow smoke test can verify the compiled launcher without opening the GUI.
-            if (args.Length == 1 && args[0] == "--portable-self-test")
-                return 0;
 
             foreach (string arg in args)
             {
@@ -61,7 +68,9 @@ internal static class PortableLauncher
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "qBittorrent Enhanced Portable", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            // CI must never display interactive error dialogs.
+            if (!selfTest)
+                MessageBox.Show(ex.Message, "qBittorrent Enhanced Portable", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
     }

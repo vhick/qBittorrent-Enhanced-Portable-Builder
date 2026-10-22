@@ -94,6 +94,26 @@ class BuilderTests(unittest.TestCase):
                 self.assertIn("qBittorrentEnhancedPortable/App/qBittorrent/platforms/qwindows.dll", zipfile_obj.namelist())
                 self.assertNotIn("qBittorrentEnhancedPortable/Data/profile/config/qBittorrent/qBittorrent.ini", zipfile_obj.namelist())
 
+    def test_self_test_runs_before_application_file_check(self):
+        """Regression: a blocking WinForms message box caused the 35-minute CI timeout."""
+        code = Path('launcher/qBittorrentEnhancedPortable.cs').read_text(encoding='utf-8')
+        self.assertIn('if (selfTest)', code)
+        self.assertIn('String.Equals(args[0], "--portable-self-test"', code)
+        self.assertLess(code.index('if (selfTest)'), code.index('if (!File.Exists(app))'))
+        self.assertIn('if (!selfTest)\n                MessageBox.Show(', code)
+        self.assertIn('Assembly.GetExecutingAssembly().Location', code)
+
+    def test_headless_self_test_has_a_hard_timeout(self):
+        workflow = Path('.github/workflows/build-portable.yml').read_text(encoding='utf-8')
+        self.assertIn('$test.WaitForExit(15000)', workflow)
+        self.assertIn('$test.Kill()', workflow)
+        self.assertNotIn("-ArgumentList '--portable-self-test' -Wait", workflow)
+        self.assertIn('timeout-minutes: 3', workflow)
+        self.assertIn('timeout-minutes: 20', workflow)
+        self.assertIn('actions/checkout@v5', workflow)
+        self.assertIn('actions/setup-python@v6', workflow)
+        self.assertIn('actions/upload-artifact@v6', workflow)
+
     def test_compiler_uses_full_source_paths(self):
         workflow = Path(".github/workflows/build-portable.yml").read_text(encoding="utf-8")
         self.assertIn("Resolve-Path -LiteralPath 'launcher/qBittorrentEnhancedPortable.cs'", workflow)

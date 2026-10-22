@@ -1,10 +1,20 @@
-# qBittorrent Enhanced Edition — True Portable Builder v1.0
+# qBittorrent Enhanced Edition — True Portable Builder v1.1
 
 Build a Windows x64 PortableApps-style ZIP from the **official c0re100 release**, with **no installer execution** on Windows. The application uses the officially supported `--profile` command-line option to keep its settings and torrent session history in `Data`.
 
 **Upstream:** https://github.com/c0re100/qBittorrent-Enhanced-Edition  
 **Official releases:** https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases  
 **Native portable mode:** https://github.com/qbittorrent/qBittorrent/wiki/How-to-use-portable-mode
+
+## v1.1 fix: GitHub Actions timeout (October 22, 2026)
+
+The v1.0 workflow downloaded, verified, and extracted the official installer successfully, but it stopped for 35 minutes during launcher verification. The C# `--portable-self-test` checked for `App\qBittorrent\qbittorrent.exe` **before** recognizing the self-test argument. At build time the app payload had not been packaged beside the compiled launcher, so it opened an error message box and the headless GitHub runner could not dismiss it.
+
+v1.1 corrects the order and makes the self-test fully headless. The workflow now terminates the self-test after 15 seconds if anything goes wrong, and caps the compilation/test step at 3 minutes. The overall job is capped at 20 minutes. It also upgrades to `actions/checkout@v5`, `actions/setup-python@v6`, and `actions/upload-artifact@v6` to use Node.js 24 compatible actions. Two new regression tests protect this behavior.
+
+**How to apply:** Replace *all builder repository files* with this ZIP's contents (preserve `.github/workflows/`), commit, then start a **new** Actions workflow run. **Do not click Re-run jobs** on the cancelled old run: that uses the old commit. No `Data` migration is needed; the application packaging/layout is unchanged.
+
+**Validation:** Linux-based source and packaging tests can run locally; the compiled Windows launcher and real application require a new GitHub Actions run. Do not treat this as a confirmed Windows build until that run completes.
 
 ## 1. Use the builder (no coding required)
 
@@ -96,4 +106,4 @@ Use torrents only for content you are allowed to download or distribute.
 
 ## Testing status
 
-The kit includes offline tests and ZIP inspection. The actual Windows workflow needs a GitHub Actions run; the Linux authoring environment cannot execute the compiled Windows app.
+The kit includes 10 offline tests (including 2 dedicated hang-regression tests) and ZIP inspection. The actual Windows workflow needs a GitHub Actions run; the Linux authoring environment cannot execute the compiled Windows app.

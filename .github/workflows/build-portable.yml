@@ -16,13 +16,13 @@ jobs:
   portable:
     name: Windows x64 Portable ZIP
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - name: Check out portable builder
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -72,6 +72,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Original icon extraction failed; no generic icon will be substituted.' }
 
       - name: Compile Windows launcher with original icon
+        timeout-minutes: 3
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -86,8 +87,22 @@ jobs:
           & $compiler '/nologo' '/target:winexe' '/platform:x64' '/optimize+' "/out:$output" "/win32icon:$icon" '/reference:System.Windows.Forms.dll' $source
           if ($LASTEXITCODE -ne 0) { throw 'C# compilation failed.' }
           if (-not (Test-Path -LiteralPath $output)) { throw 'Launcher binary was not produced.' }
-          $test = Start-Process -FilePath $output -ArgumentList '--portable-self-test' -Wait -PassThru
-          if ($test.ExitCode -ne 0) { throw 'Launcher self-test returned error code ' + $test.ExitCode }
+          Write-Host 'Launcher compiled. Running HEADLESS self-test with a 15-second timeout...'
+          $test = Start-Process -FilePath $output -ArgumentList '--portable-self-test' -PassThru -ErrorAction Stop
+          try {
+            if (-not $test.WaitForExit(15000)) {
+              try { $test.Kill() } catch { }
+              throw 'Launcher self-test timed out (15 seconds). Stopped to prevent a stuck CI job. Inspect self-test ordering or modal dialogs.'
+            }
+            if ($test.ExitCode -ne 0) { throw ('Launcher self-test returned error code ' + $test.ExitCode) }
+          }
+          finally {
+            $test.Dispose()
+          }
+          if (Test-Path -LiteralPath 'work/Data') {
+            throw 'Headless launcher self-test unexpectedly created a Data folder.'
+          }
+          Write-Host 'PASS: launcher starts and exits headlessly without a packaged application.'
 
       - name: Create complete PortableApps-style application ZIP
         shell: pwsh
@@ -98,7 +113,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'ZIP validation failed.' }
 
       - name: Upload portable ZIP only
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: qBittorrent-Enhanced-Portable-Windows-x64
           path: dist/*.zip
