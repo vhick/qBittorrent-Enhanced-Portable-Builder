@@ -32,11 +32,17 @@ jobs:
           python -m pip install --disable-pip-version-check pefile==2024.8.26 Pillow==11.3.0
           if ($LASTEXITCODE -ne 0) { throw 'Python packaging dependency install failed' }
 
-      - name: Run tests
+      - name: Run current v1.3 tests (ignore leftover v1.1 tests)
         shell: pwsh
         run: |
-          python -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw 'Builder tests failed' }
+          # Uploading replacement files to GitHub DOES NOT delete files from
+          # prior versions. In particular, tests/test_builder.py from v1.1
+          # asserts the old launcher behavior and must not be executed here.
+          if (Test-Path -LiteralPath 'tests/test_builder.py') {
+            Write-Warning 'Obsolete tests/test_builder.py detected. Remove it from this repository when convenient; it belongs to v1.1.'
+          }
+          python -m unittest discover -s tests -p 'test_portable_builder.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Current portable builder tests failed' }
 
       - name: Download, verify, and extract official upstream releases
         timeout-minutes: 12

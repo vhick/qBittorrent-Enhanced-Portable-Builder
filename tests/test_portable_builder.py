@@ -74,6 +74,13 @@ class PortableTests(unittest.TestCase):
         self.assertIn('actions/upload-artifact@v6',w)
         self.assertIn('scripts/package.py',w)
 
+    def test_test_discovery_only_runs_current_builder_tests(self):
+        """Old test_builder.py from v1.1 may still exist after browser upload."""
+        workflow=(ROOT/'.github/workflows/build-portable.yml').read_text()
+        self.assertIn("unittest discover -s tests -p 'test_portable_builder.py' -v", workflow)
+        self.assertIn("Obsolete tests/test_builder.py detected", workflow)
+        self.assertNotIn("python -m unittest discover -s tests -v", workflow)
+
     def test_package_smoke_fixture_preserves_empty_data(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)/'qBittorrentEnhancedPortable'
