@@ -1,109 +1,81 @@
-# qBittorrent Enhanced Edition — True Portable Builder v1.1
+# qBittorrent Enhanced Edition Portable Builder v1.2
 
-Build a Windows x64 PortableApps-style ZIP from the **official c0re100 release**, with **no installer execution** on Windows. The application uses the officially supported `--profile` command-line option to keep its settings and torrent session history in `Data`.
+A manually triggered, ZIP-only Windows x64 GitHub Actions builder for [c0re100/qBittorrent-Enhanced-Edition](https://github.com/c0re100/qBittorrent-Enhanced-Edition), with an isolated built-in Python runtime for **qBittorrent Search and Jackett plugins**.
 
-**Upstream:** https://github.com/c0re100/qBittorrent-Enhanced-Edition  
-**Official releases:** https://github.com/c0re100/qBittorrent-Enhanced-Edition/releases  
-**Native portable mode:** https://github.com/qbittorrent/qBittorrent/wiki/How-to-use-portable-mode
+## What v1.2 fixes
 
-## v1.1 fix: GitHub Actions timeout (October 22, 2026)
+Previous portable builds isolated the qBittorrent profile, but depended on the Windows computer to have an appropriate Python executable for search plugins. If there wasn't one, or qBittorrent failed to locate it, **all search plugins, including Jackett, could fail together**.
 
-The v1.0 workflow downloaded, verified, and extracted the official installer successfully, but it stopped for 35 minutes during launcher verification. The C# `--portable-self-test` checked for `App\qBittorrent\qbittorrent.exe` **before** recognizing the self-test argument. At build time the app payload had not been packaged beside the compiled launcher, so it opened an error message box and the headless GitHub runner could not dismiss it.
+This version downloads a verified, official **CPython 3.14.10 Windows x64 embeddable package** from python.org and packages it under `App/Python`. The launcher writes the correct absolute Python path into qBittorrent's own `Data/profile/config/qBittorrent/qBittorrent.ini` `[Preferences]` section (`Search\pythonExecutablePath`), making the path automatically update if the portable drive letter changes. No Python installation, system PATH modification, registry setting, or admin access is required.
 
-v1.1 corrects the order and makes the self-test fully headless. The workflow now terminates the self-test after 15 seconds if anything goes wrong, and caps the compilation/test step at 3 minutes. The overall job is capped at 20 minutes. It also upgrades to `actions/checkout@v5`, `actions/setup-python@v6`, and `actions/upload-artifact@v6` to use Node.js 24 compatible actions. Two new regression tests protect this behavior.
+Python 3.14.10 was published October 25, 2026 with important security fixes. Because third-party plugin scripts vary, **we cannot guarantee every plugin supports Python 3.14 yet**. The build checks the bundled interpreter and key standard-library modules; running a real search still requires an interactive Windows test.
 
-**How to apply:** Replace *all builder repository files* with this ZIP's contents (preserve `.github/workflows/`), commit, then start a **new** Actions workflow run. **Do not click Re-run jobs** on the cancelled old run: that uses the old commit. No `Data` migration is needed; the application packaging/layout is unchanged.
+The original application icon is extracted from the publisher's executable. The original installer is **extracted, never executed**. No plugins are downloaded or installed without user action.
 
-**Validation:** Linux-based source and packaging tests can run locally; the compiled Windows launcher and real application require a new GitHub Actions run. Do not treat this as a confirmed Windows build until that run completes.
+## How to build (browser only)
 
-## 1. Use the builder (no coding required)
+1. Download and extract this builder ZIP.
+2. Open your existing `qBittorrent-Enhanced-Portable-Builder` GitHub repository.
+3. Upload all the extracted files to the repository root, preserving `.github/workflows/build-portable.yml`, and **replace the previous versions**. Commit to `main`.
+4. Click **Actions → Build qBittorrent Enhanced Portable (Manual) → Run workflow**. Leave `upstream_tag` set to `latest`, or choose a published tag such as `release-5.2.4.10`.
+5. When it succeeds, download the `qBittorrent-Enhanced-Portable-Windows-x64` artifact. Inside it is the final portable application ZIP.
+6. **Completely exit** your old portable qBittorrent, including its tray icon. Make a copy of your entire **old `Data` folder**.
+7. Extract the new application ZIP into a temporary location. **Replace your old `App`, `Other`, and root `qBittorrentEnhancedPortable.exe`** with the new files; **keep your existing `Data` folder unchanged**.
+8. Launch using the root **`qBittorrentEnhancedPortable.exe`**. Open **Tools → Options → Advanced → Python executable path**. It should point inside your portable folder at `App\Python\python.exe` (without surrounding quotation marks). Check **View → Search Engine** and try a trusted plugin.
 
-1. Create a new **public or private** GitHub repository, e.g. `qBittorrent-Enhanced-Portable-Builder`.
-2. Extract the builder kit ZIP on your PC, then upload **all its contents** into the **root of the repository**. Preserve the hidden `.github/workflows/` folder.
-3. Commit the files. GitHub can take a moment to show the new workflow under **Actions**.
-4. Go to **Actions > Build qBittorrent Enhanced Portable (Manual) > Run workflow**.
-5. Leave `upstream_tag` as `latest`, or specify a release tag like `release-5.2.4.10`. Press **Run workflow**.
-6. When the job succeeds, download the artifact named `qBittorrent-Enhanced-Portable-Windows-x64`.
-7. Unzip the artifact, then unzip the **application ZIP inside it**. You will get a single `qBittorrentEnhancedPortable` folder.
-8. Run **`qBittorrentEnhancedPortable.exe`** in that folder. You do not need to install qBittorrent or Python.
+**Do not use “Re-run jobs” on the old run.** Trigger a new run after committing v1.2. The artifact is kept for one day.
 
-**Note:** The builder ZIP only contains GitHub source/workflow files. GitHub Actions creates the finished Windows application ZIP; it is not bundled into this kit. The artifact is retained for **1 day**, so download it after a successful run.
+## The final portable ZIP
 
-## 2. The final app structure
-
-```
+```text
 qBittorrentEnhancedPortable/
-├── qBittorrentEnhancedPortable.exe    <- LAUNCH THIS
+├── qBittorrentEnhancedPortable.exe        ← launch this
 ├── App/
-│   ├── qBittorrent/
-│   │   ├── qbittorrent.exe
-│   │   └── [upstream DLLs, Qt plugins, translations...]
-│   └── AppInfo/
+│   ├── qBittorrent/                       ← original untouched program and Qt libraries
+│   │   └── qbittorrent.exe
+│   ├── Python/                            ← official portable Python 3.14.10
+│   │   ├── python.exe
+│   │   ├── python314.zip
+│   │   ├── python314._pth
+│   │   └── ...
+│   └── AppInfo/                           ← PortableApps Menu metadata and original icon
 │       ├── appinfo.ini
-│       ├── appicon.ico                 <- ORIGINAL multi-size upstream icon
-│       ├── appicon_16.png
-│       ├── appicon_32.png
-│       └── ...
+│       ├── appicon.ico
+│       └── appicon_*.png
 ├── Data/
-│   ├── profile/                       <- ALL qBittorrent preferences and resume data
-│   ├── Downloads/                     <- default on first launch
-│   └── portable-root.txt              <- created on first launch
+│   ├── profile/                           ← settings, search plugins, cached .torrent files
+│   └── Downloads/                         ← default download folder
 └── Other/
-    ├── PORTABLE-README.txt
-    └── Source/
+    ├── PORTABLE-GUIDE.md
+    ├── Launcher-Source.cs
+    ├── build-info.json
+    └── SOURCE-LICENSES.txt
 ```
 
-The package's `Data` folder is EMPTY at build time. The launcher creates preferences on first start. This avoids an upgrade accidentally overwriting older settings.
+`Data` is shipped empty (directories only), so the new ZIP cannot overwrite any personal settings or plugin files when you update correctly.
 
-## 3. How it stays portable
+## Jackett and other search plugins
 
-- Official `--profile=<folder>` directs config, logs, saved .torrent files and resume state into `Data/profile`.
-- The launcher creates `Data/Downloads` and sets it as the **initial default downloads directory** if no previous preferences exist.
-- The launcher uses the original Windows icon embedded in official `qbittorrent.exe`; no generic icons.
-- No installer is executed, and the builder does not register file extensions, startup entries, desktop shortcuts, magnet handlers or Explorer context-menu commands.
-- Does NOT require administrator rights or an NTFS junction. No need to copy/delete host AppData before/after launching.
-- External programs (file manager, WebUI browser, antivirus, Windows firewall, network stacks) can create host traces. This is profile portability, not a virtual machine or full OS sandbox.
+The **Jackett Python plugin** and the **Jackett server/application** are different programs. Bundling Python makes qBittorrent able to run Python plugins, but **does not install or run the Jackett service**. Keep your existing Jackett server running before you search, and confirm its API key and address are correct.
 
-**Do not launch `App/qBittorrent/qbittorrent.exe` directly**: it would bypass the root launcher, potentially use a different profile, and might write to host AppData.
+1. Open qBittorrent Search → **Search plugins…** and confirm the plugin you want is listed and enabled. If needed, install trusted plugins from the [official search-plugins repository](https://github.com/qbittorrent/search-plugins/wiki/Install-search-plugins).
+2. Jackett's official plugin is at `https://raw.githubusercontent.com/qbittorrent/search-plugins/master/nova3/engines/jackett.py`. Its `jackett.json` configuration must live **beside the installed `jackett.py` inside the portable profile's search engines folder**, normally `Data\profile\data\qBittorrent\nova3\engines\` (check your actual folder). Do not place API keys in the builder repository.
+3. Open the Jackett application and copy its API Key into your existing private `jackett.json`. The default URL is `http://127.0.0.1:9117` when both apps are on the same PC. Restart qBittorrent after editing the config.
+4. If the plugin still fails, first check Python in **Tools → Options → Advanced**, then check Jackett's actual server status, URL and API key. An outdated third-party plugin, firewall or proxy can also prevent searches.
 
-## 4. Updates WITHOUT losing data
+**Never share a populated `Data` folder** or `jackett.json`: it can contain passwords, WebUI credentials, torrent history and API keys.
 
-1. Exit qBittorrent fully, including the tray icon, and wait for all torrents to stop.
-2. Back up the whole `Data` directory.
-3. Run the builder again using `latest`. Download the new app ZIP.
-4. From the new ZIP, replace the existing root `qBittorrentEnhancedPortable.exe`, `App` folder and `Other` folder.
-5. **Keep the original `Data` directory**. Never overwrite or delete it.
-6. Launch again. Your saved torrents and settings should return.
+## Portability and upgrade notes
 
-**Moving PC or drive letters:** The launcher adjusts its *own default* `Data/Downloads` value when a previously recorded root path changes. It does NOT rewrite saved torrent file locations or move download files. If drive letters change, existing torrents may show missing files until you correct the save paths (e.g. choose the new location and force-recheck). Back up Data before migration.
+- All normal qBittorrent preferences, search plugins and Jackett plugin configuration are preserved under `Data/profile` using the official `--profile` feature. The launcher patches only the search Python preference and (only if moving drives) a matching old `Data/Downloads` default value. Existing per-torrent save locations are **never** blindly changed.
+- A one-time backup of your original preferences is saved as `qBittorrent.ini.portable-pre-python.bak` in the same portable config folder before the first v1.2 edit.
+- Settings such as **torrent associations**, **start with Windows**, default-client status and Windows firewall integrations may still write to the host OS if you enable them in the program; this is portable **profile isolation**, not a virtual machine and not a guarantee of zero OS traces.
+- Python may be updated in a future builder version because security fixes matter. Using an embedded runtime means you should rebuild periodically when a new supported Python version is available.
+- The GitHub workflow checks official Python SHA-256 against the published Python Software Foundation hash and checks the GitHub qBittorrent release digest when available.
+- **Compatibility limit:** a plugin may rely on removed Python modules or break with a newer interpreter. If only one plugin fails and others work, the plugin is likely the problem; do not wipe your entire `Data` folder.
 
-If you had installed qBittorrent previously and want to migrate the prior settings, first back up both `%APPDATA%\qBittorrent` and `%LOCALAPPDATA%\qBittorrent`. Their layout may differ by version, so migrate carefully and verify your torrents before deleting anything. The builder never touches installed settings.
+## Testing / troubleshooting
 
-## 5. Good practice / optional integrations
+The workflow tests the actual bundled Python executable, several standard modules used by plugins, original icon and compiled launcher's headless configuration self-test. The portable ZIP structure is also verified. It does not simulate a real Windows desktop qBittorrent search or a live Jackett server connection.
 
-For maximum portability, leave **start with Windows**, **magnet or .torrent association**, and other system integration options OFF. You can drag `.torrent` files onto the portable launcher or use **File > Add Torrent Link**.
-
-Built-in WebUI exposes a network interface: use a strong password, restrict remote access and keep the app up to date. Do not assume portability makes torrenting private or anonymous.
-
-Use torrents only for content you are allowed to download or distribute.
-
-## 6. Build failures
-
-- **Cannot find Windows x64 installer**: Upstream changed its asset naming. See `scripts/resolve_release.py`; the workflow fails instead of silently choosing a 32-bit/Linux asset.
-- **Installer SHA256 mismatch**: workflow stops; do not bypass the check.
-- **7-Zip extraction failed**: find this step in Actions logs; attach the log ZIP if asking for help.
-- **Original icon extraction failed**: attach the log. We do not substitute a generic icon.
-- **Launcher C# path compilation error**: workflow passes ABSOLUTE paths for `.cs` and `.ico`; this addresses the earlier AyuGram path issue.
-- **App won't open**: verify that the ZIP was completely extracted; keep the Qt plugin folders under `App/qBittorrent`.
-
-## Technical notes
-
-- Python 3.12 on Windows GitHub runner; `pefile` extracts original full-resolution PE icon group, Pillow makes menu PNGs.
-- Windows .NET Framework C# compiler builds root launcher as small GUI `exe` (no separate .NET runtime required beyond Windows Framework availability).
-- Uses GitHub release API (public upstream) and verifies release asset `sha256:` digest if GitHub publishes one.
-- Only one ZIP artifact, manual Actions trigger, 1-day retention.
-- No continuous synchronization, automatic release monitoring or scheduled builds.
-
-## Testing status
-
-The kit includes 10 offline tests (including 2 dedicated hang-regression tests) and ZIP inspection. The actual Windows workflow needs a GitHub Actions run; the Linux authoring environment cannot execute the compiled Windows app.
+If a GitHub build fails, download the failed run's logs ZIP and share that ZIP. If a plugin fails after the app starts, a screenshot of the exact Search error and Python executable field is more useful than deleting existing profiles.

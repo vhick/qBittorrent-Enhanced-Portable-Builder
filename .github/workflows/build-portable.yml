@@ -4,115 +4,105 @@ on:
   workflow_dispatch:
     inputs:
       upstream_tag:
-        description: 'Official upstream release: latest or release-5.2.4.10'
+        description: 'Official release tag, or latest'
         required: true
-        default: 'latest'
+        default: latest
         type: string
 
 permissions:
   contents: read
 
 jobs:
-  portable:
-    name: Windows x64 Portable ZIP
+  build:
+    name: Build Windows x64 portable ZIP with Python search support
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
-      - name: Check out portable builder
+      - name: Checkout builder
         uses: actions/checkout@v5
 
-      - name: Set up Python
+      - name: Set up build-time Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
-      - name: Install icon and packaging tools
+      - name: Install icon extraction dependencies
         shell: pwsh
         run: |
-          python -m pip install --disable-pip-version-check --no-cache-dir pefile==2024.8.26 Pillow==11.3.0
-          if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
+          python -m pip install --disable-pip-version-check pefile==2024.8.26 Pillow==11.3.0
+          if ($LASTEXITCODE -ne 0) { throw 'Python packaging dependency install failed' }
 
-      - name: Run offline builder tests
+      - name: Run tests
         shell: pwsh
         run: |
           python -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw 'Offline tests failed.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Builder tests failed' }
 
-      - name: Download and verify upstream Windows installer
+      - name: Download, verify, and extract official upstream releases
+        timeout-minutes: 12
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           UPSTREAM_TAG: ${{ inputs.upstream_tag }}
-        shell: pwsh
         run: |
-          python scripts/resolve_release.py --tag "$env:UPSTREAM_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Official release download or SHA256 verification failed.' }
+          python scripts/build.py --tag "$env:UPSTREAM_TAG" --out work
+          if ($LASTEXITCODE -ne 0) { throw 'Official app or Python download/extraction failed' }
 
-      - name: Extract official installer without installing
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
-          if (-not $sevenZip) {
-            $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
-          }
-          if (-not (Test-Path -LiteralPath $sevenZip)) { throw '7-Zip was not found on the Windows runner.' }
-          $installer = Get-ChildItem -LiteralPath 'work/download' -File -Filter '*.exe' | Select-Object -First 1
-          if (-not $installer) { throw 'Downloaded installer is missing.' }
-          New-Item -ItemType Directory -Force -Path 'work/extracted' | Out-Null
-          & $sevenZip 'x' '-y' "-owork/extracted" $installer.FullName
-          if ($LASTEXITCODE -ne 0) { throw '7-Zip extraction of the official installer failed.' }
-
-      - name: Extract original multi-resolution qBittorrent icon
+      - name: Test bundled Python runtime and search dependencies
+        timeout-minutes: 2
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-ChildItem -Path 'work/extracted' -Recurse -File | Where-Object { $_.Name -ieq 'qbittorrent.exe' } | Select-Object -First 1
-          if (-not $exe) { throw 'No qbittorrent.exe could be found inside installer.' }
-          python scripts/extract_icon.py "$($exe.FullName)" work/appicon.ico
-          if ($LASTEXITCODE -ne 0) { throw 'Original icon extraction failed; no generic icon will be substituted.' }
+          $exe = (Resolve-Path 'work/qBittorrentEnhancedPortable/App/Python/python.exe').Path
+          # Verify the ACTUAL bundled Python (rather than GitHub runner Python).
+          & $exe -c "import sys, ssl, json, urllib.request, xml.etree.ElementTree, multiprocessing.dummy; assert sys.version_info[:2] == (3,14); print('Bundled Python OK:', sys.version); print('OpenSSL:', ssl.OPENSSL_VERSION)"
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled Python failed basic modules check' }
+          # qBittorrent nova scripts add their own location to sys.path.
+          # Do not use the runner's globally installed Python during this test.
 
-      - name: Compile Windows launcher with original icon
+      - name: Extract original qBittorrent icon
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = (Resolve-Path 'work/qBittorrentEnhancedPortable/App/qBittorrent/qbittorrent.exe').Path
+          python scripts/icon.py "$source" 'work/qBittorrentEnhancedPortable/App/AppInfo/appicon.ico'
+          if ($LASTEXITCODE -ne 0) { throw 'Original icon extraction failed' }
+
+      - name: Compile and headless-test launcher
         timeout-minutes: 3
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-          if (-not (Test-Path -LiteralPath $compiler)) {
-            $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe'
-          }
-          if (-not (Test-Path -LiteralPath $compiler)) { throw 'Windows .NET Framework C# compiler is unavailable.' }
-          $source = (Resolve-Path -LiteralPath 'launcher/qBittorrentEnhancedPortable.cs').Path
-          $icon = (Resolve-Path -LiteralPath 'work/appicon.ico').Path
-          $output = Join-Path (Resolve-Path 'work').Path 'qBittorrentEnhancedPortable.exe'
-          & $compiler '/nologo' '/target:winexe' '/platform:x64' '/optimize+' "/out:$output" "/win32icon:$icon" '/reference:System.Windows.Forms.dll' $source
-          if ($LASTEXITCODE -ne 0) { throw 'C# compilation failed.' }
-          if (-not (Test-Path -LiteralPath $output)) { throw 'Launcher binary was not produced.' }
-          Write-Host 'Launcher compiled. Running HEADLESS self-test with a 15-second timeout...'
-          $test = Start-Process -FilePath $output -ArgumentList '--portable-self-test' -PassThru -ErrorAction Stop
+          if (!(Test-Path $compiler)) { throw 'Missing .NET Framework C# compiler' }
+          $source = (Resolve-Path 'launcher/qBittorrentEnhancedPortable.cs').Path
+          $icon = (Resolve-Path 'work/qBittorrentEnhancedPortable/App/AppInfo/appicon.ico').Path
+          $root = (Resolve-Path 'work/qBittorrentEnhancedPortable').Path
+          $dest = Join-Path $root 'qBittorrentEnhancedPortable.exe'
+          & $compiler '/nologo' '/target:winexe' '/platform:x64' '/optimize+' "/win32icon:$icon" "/out:$dest" '/reference:System.Windows.Forms.dll' $source
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $dest)) { throw 'Launcher compilation failed' }
+          $p = Start-Process -FilePath $dest -ArgumentList '--portable-self-test' -PassThru
           try {
-            if (-not $test.WaitForExit(15000)) {
-              try { $test.Kill() } catch { }
-              throw 'Launcher self-test timed out (15 seconds). Stopped to prevent a stuck CI job. Inspect self-test ordering or modal dialogs.'
+            if (!$p.WaitForExit(15000)) {
+              try { $p.Kill() } catch { }
+              throw 'Launcher self-test timeout (15 sec)'
             }
-            if ($test.ExitCode -ne 0) { throw ('Launcher self-test returned error code ' + $test.ExitCode) }
-          }
-          finally {
-            $test.Dispose()
-          }
-          if (Test-Path -LiteralPath 'work/Data') {
-            throw 'Headless launcher self-test unexpectedly created a Data folder.'
-          }
-          Write-Host 'PASS: launcher starts and exits headlessly without a packaged application.'
+            if ($p.ExitCode -ne 0) { throw "Launcher self-test failed with exit code $($p.ExitCode)" }
+          } finally { $p.Dispose() }
+          Write-Host 'Launcher self-test passed'
+          # Embed the portable launcher source in the final app, not user data.
+          New-Item -ItemType Directory -Force 'work/qBittorrentEnhancedPortable/Other' | Out-Null
+          Copy-Item -LiteralPath $source -Destination 'work/qBittorrentEnhancedPortable/Other/Launcher-Source.cs'
+          Copy-Item -LiteralPath 'README.md' -Destination 'work/qBittorrentEnhancedPortable/Other/PORTABLE-GUIDE.md'
 
-      - name: Create complete PortableApps-style application ZIP
+      - name: Verify final package and create ZIP
+        timeout-minutes: 5
         shell: pwsh
         run: |
-          python scripts/package_app.py
-          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
-          python scripts/verify_package.py
-          if ($LASTEXITCODE -ne 0) { throw 'ZIP validation failed.' }
+          python scripts/package.py work/qBittorrentEnhancedPortable dist/qBittorrent-Enhanced-Portable-Windows-x64.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP creation or validation failed' }
 
-      - name: Upload portable ZIP only
+      - name: Upload ZIP artifact
         uses: actions/upload-artifact@v6
         with:
           name: qBittorrent-Enhanced-Portable-Windows-x64
